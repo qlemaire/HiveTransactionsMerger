@@ -11,7 +11,100 @@ namespace HiveTransactionsMerger
 {
     class Program
     {
-        public class Options
+        internal class Logger
+        {
+            public enum Level
+            {
+                None,
+                Info,
+                Verbose
+            }
+
+            private Level level;
+            private static Logger _instance;
+
+            private Logger(Level level)
+            {
+                this.level = level;
+            }
+
+            public void SetLevel(Level level)
+            {
+                this.level = level;
+            }
+
+            public void Verbose(string message)
+            {
+                this.write(message, Level.Verbose);
+            }
+
+            public void Info(string message)
+            {
+                this.write(message, Level.Info);
+            }
+
+            public void Error(string message)
+            {
+                Console.Error.Write(message);
+            }
+
+            /**
+             * param name="logLevel"
+             * logLevel requested by the write
+             */
+            private void write(string message, Level logLevel)
+            {
+                if (this.level >= logLevel) // should we display the log?
+                {
+                    string prefix = Logger.getPrefix(logLevel);
+                    var _previousForegroundColor = Console.ForegroundColor;
+                    Console.ForegroundColor = Logger.getColor(logLevel);
+                    Console.WriteLine(prefix + message);
+                    Console.ForegroundColor = _previousForegroundColor;
+                }
+            }
+
+            private static ConsoleColor getColor(Level level)
+            {
+                switch (level)
+                {
+                    case Level.None:
+                        return ConsoleColor.Black;
+                    case Level.Info:
+                        return ConsoleColor.Blue;
+                    case Level.Verbose:
+                        return ConsoleColor.Green;
+                    default:
+                        return ConsoleColor.Black;
+                } 
+            }
+
+            private static string getPrefix(Level level)
+            {
+                switch (level)
+                {
+                    case Level.None:
+                        return "";
+                    case Level.Info:
+                        return "[i] ";
+                    case Level.Verbose:
+                        return "[*] ";
+                    default:
+                        return "";
+                }
+            }
+
+            public static Logger GetInstance()
+            {
+                if (Logger._instance == null)
+                {
+                    Logger._instance = new Logger(Level.None);
+                }
+                return Logger._instance;
+            }
+        }
+
+        internal class Options
         {
             [Option('d', "DirtyHive", Required = true, HelpText = "Dirty hive to process.")]
             public string DirtyHiveFilename { get; set; }
@@ -58,21 +151,44 @@ namespace HiveTransactionsMerger
 
         static void Run(Options opts)
         {
-            Console.WriteLine("Number of transactions logs: {0}", opts.TransactionFilenames.Count());
+            var logger = Logger.GetInstance();
+            logger.SetLevel(opts.Verbose ? Logger.Level.Verbose : Logger.Level.Info);
+
+            logger.Info(String.Format("Number of transactions logs: {0}", opts.TransactionFilenames.Count()));
             foreach (var trans in opts.TransactionFilenames)
             {
-                Console.WriteLine("[i] Transaction file: {0}", trans);
+                logger.Verbose(String.Format("Transaction file: {0}", trans));
             }
 
             /* Online: commitRegistry */
             // TODO
 
             /* Offline */
-            var registryHive = new RegistryHive(opts.DirtyHiveFilename);
-            byte[] mergedHive = registryHive.ProcessTransactionLogs(opts.TransactionFilenames.ToList());
+            RegistryHive registryHive = null;
+            try
+            {
+                registryHive = new RegistryHive(opts.DirtyHiveFilename);
+            }
+            catch (Exception exception)
+            {
+                logger.Error(String.Format("Impossible to parse hive: {0}", exception.Message));
+                Environment.Exit(1);
+            }
 
-            Console.WriteLine("[*] Merged {0} bytes", mergedHive.Length);
-            Console.WriteLine("[*] Writing to {0}", opts.OutputFilename);
+            byte[] mergedHive = null;
+            try
+            {
+                mergedHive = registryHive.ProcessTransactionLogs(opts.TransactionFilenames.ToList());
+            }
+            catch (Exception exception)
+            {
+                logger.Error(String.Format("An exception occured while processing transaction logs: {0}", exception.Message));
+                Environment.Exit(1);
+            }
+            
+
+            logger.Info(String.Format("Merged {0} bytes", mergedHive.Length));
+            logger.Info(String.Format("Writing to {0}", opts.OutputFilename));
 
             using (var fs = new FileStream(opts.OutputFilename, FileMode.Create))
             {
@@ -82,7 +198,7 @@ namespace HiveTransactionsMerger
                 }
             }
 
-            Console.WriteLine("[*] Done");
+            logger.Info("Done");
         }
 
 
